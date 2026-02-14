@@ -1,14 +1,23 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Hello World</title>
-  <link href='/style.css' rel='stylesheet'>
-</head>
-<body>
-  <h1>Hello, world!</h1>
-  <button onclick="console.log('hello');">Press me</button>
-  <script defer type="text/javascript" src="/main.js"></script>
-</body>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>로또 번호 생성기</title>
+    <link href="/style.css" rel="stylesheet" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="card">
+        <h1>로또 번호 생성기</h1>
+        <p class="sub">1부터 45까지 중복 없이 6개 번호를 자동으로 뽑습니다.</p>
+
+        <button id="generate-btn" type="button">번호 생성</button>
+        <ul id="numbers" class="numbers"></ul>
+        <p id="history" class="history"></p>
+      </section>
+    </main>
+
+    <script defer src="/main.js"></script>
+  </body>
 </html>
