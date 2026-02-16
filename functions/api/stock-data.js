@@ -90,27 +90,68 @@ function formatNum(value) {
   return value.toFixed(2);
 }
 
+function toEodhdUsSymbol(symbol) {
+  const raw = String(symbol || "").trim().toUpperCase();
+  if (!raw) return "";
+  if (raw.endsWith(".US")) return raw;
+
+  if (raw.includes(".")) {
+    const base = raw.slice(0, raw.lastIndexOf("."));
+    return `${base}.US`;
+  }
+
+  return `${raw}.US`;
+}
+
+function extractForwardPe(payload) {
+  if (payload == null) return null;
+
+  if (typeof payload === "number" || typeof payload === "string") {
+    const direct = Number(payload);
+    return Number.isFinite(direct) ? direct : null;
+  }
+
+  const raw =
+    payload?.Highlights?.ForwardPE ??
+    payload?.Valuation?.ForwardPE ??
+    payload?.forward_pe ??
+    payload?.ForwardPE;
+
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : null;
+}
+
 async function fetchUsForwardPe(symbol, apiKey) {
   if (!symbol) return null;
 
   const key = apiKey || "demo";
-  const params = new URLSearchParams({
-    symbol,
-    apikey: key
-  });
+  const eodhdSymbol = toEodhdUsSymbol(symbol);
+  const encodedSymbol = encodeURIComponent(eodhdSymbol);
+  const encodedKey = encodeURIComponent(key);
+  const urls = [
+    `https://eodhd.com/api/fundamentals/${encodedSymbol}?filter=Highlights::ForwardPE&api_token=${encodedKey}&fmt=json`,
+    `https://eodhd.com/api/fundamentals/${encodedSymbol}?api_token=${encodedKey}&fmt=json`
+  ];
 
-  const response = await fetch(`https://api.twelvedata.com/statistics?${params.toString()}`, {
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-      Accept: "application/json"
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          Accept: "application/json"
+        }
+      });
+      if (!response.ok) continue;
+
+      const payload = await response.json();
+      const value = extractForwardPe(payload);
+      if (value != null) return value;
+    } catch (_) {
+      // Ignore parsing/network errors and try fallback endpoint.
     }
-  });
+  }
 
-  if (!response.ok) return null;
-  const payload = await response.json();
-  const raw = payload?.statistics?.valuations_metrics?.forward_pe;
-  const num = Number(raw);
-  return Number.isFinite(num) ? num : null;
+  return null;
 }
 
 function buildPayload(meta, basic, integration, finance, forwardPe) {
@@ -260,7 +301,7 @@ async function handleStockData(requestUrl, env) {
 
   let forwardPe = null;
   if (market === "US") {
-    forwardPe = await fetchUsForwardPe(basic?.symbolCode, env?.TWELVE_DATA_API_KEY);
+    forwardPe = await fetchUsForwardPe(basic?.symbolCode, env?.EODHD_API_KEY);
   }
 
   return json(buildPayload({ market, code }, basic, integration, finance, forwardPe));
