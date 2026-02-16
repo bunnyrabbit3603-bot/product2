@@ -1,13 +1,13 @@
-const STOCKS = {
+const DEFAULT_STOCKS = {
   KR: [
-    { code: "005930", symbol: "005930", name: "삼성전자", exchange: "KRX", tvSymbol: "KRX:005930" },
-    { code: "000660", symbol: "000660", name: "SK하이닉스", exchange: "KRX", tvSymbol: "KRX:000660" },
-    { code: "035420", symbol: "035420", name: "NAVER", exchange: "KRX", tvSymbol: "KRX:035420" }
+    { code: "005930", symbol: "005930", name: "삼성전자", exchange: "KRX", tvSymbol: "KRX:005930", market: "KR" },
+    { code: "000660", symbol: "000660", name: "SK하이닉스", exchange: "KRX", tvSymbol: "KRX:000660", market: "KR" },
+    { code: "035420", symbol: "035420", name: "NAVER", exchange: "KRX", tvSymbol: "KRX:035420", market: "KR" }
   ],
   US: [
-    { code: "AAPL.O", symbol: "AAPL", name: "Apple", exchange: "NASDAQ", tvSymbol: "NASDAQ:AAPL" },
-    { code: "MSFT.O", symbol: "MSFT", name: "Microsoft", exchange: "NASDAQ", tvSymbol: "NASDAQ:MSFT" },
-    { code: "NVDA.O", symbol: "NVDA", name: "NVIDIA", exchange: "NASDAQ", tvSymbol: "NASDAQ:NVDA" }
+    { code: "AAPL.O", symbol: "AAPL", name: "Apple", exchange: "NASDAQ", tvSymbol: "NASDAQ:AAPL", market: "US" },
+    { code: "MSFT.O", symbol: "MSFT", name: "Microsoft", exchange: "NASDAQ", tvSymbol: "NASDAQ:MSFT", market: "US" },
+    { code: "NVDA.O", symbol: "NVDA", name: "NVIDIA", exchange: "NASDAQ", tvSymbol: "NASDAQ:NVDA", market: "US" }
   ]
 };
 
@@ -33,43 +33,37 @@ const chartBox = document.getElementById("tv-chart");
 const state = {
   market: "KR",
   query: "",
-  symbol: "",
+  selectedCode: "",
   cache: new Map(),
   loading: false,
-  error: ""
+  error: "",
+  searchResults: [],
+  searchError: "",
+  searchCache: new Map(),
+  searchSeq: 0
 };
 
-function getMarketList() {
-  return STOCKS[state.market] || [];
-}
-
-function filteredList() {
-  const query = state.query.trim().toLowerCase();
-  const list = getMarketList();
-
+function getCurrentList() {
+  const query = state.query.trim();
   if (!query) {
-    return list;
+    return DEFAULT_STOCKS[state.market] || [];
   }
-
-  return list.filter((item) => {
-    return item.symbol.toLowerCase().includes(query) || item.name.toLowerCase().includes(query) || item.code.toLowerCase().includes(query);
-  });
+  return state.searchResults;
 }
 
-function ensureSelectedSymbol(list) {
+function ensureSelectedCode(list) {
   if (!list.length) {
-    state.symbol = "";
+    state.selectedCode = "";
     return;
   }
 
-  if (!list.some((item) => item.symbol === state.symbol)) {
-    state.symbol = list[0].symbol;
+  if (!list.some((item) => item.code === state.selectedCode)) {
+    state.selectedCode = list[0].code;
   }
 }
 
-function selectedMeta() {
-  const list = filteredList();
-  return list.find((item) => item.symbol === state.symbol) || null;
+function selectedMeta(list) {
+  return list.find((item) => item.code === state.selectedCode) || null;
 }
 
 function renderTabs() {
@@ -81,14 +75,25 @@ function renderTabs() {
 }
 
 function renderSelect(list) {
-  symbolSelect.innerHTML = list.map((item) => `<option value="${item.symbol}">${item.name} (${item.symbol})</option>`).join("");
-  symbolSelect.value = state.symbol;
+  if (!list.length) {
+    symbolSelect.innerHTML = `<option value="">검색 결과 없음</option>`;
+    symbolSelect.value = "";
+    return;
+  }
+
+  symbolSelect.innerHTML = list
+    .map((item) => `<option value="${item.code}">${item.name} (${item.symbol})</option>`)
+    .join("");
+  symbolSelect.value = state.selectedCode;
 }
 
 function renderQuickList(list) {
   quickList.innerHTML = list
     .slice(0, 6)
-    .map((item) => `<button class="quick-item ${item.symbol === state.symbol ? "is-picked" : ""}" data-symbol="${item.symbol}" type="button">${item.name}</button>`)
+    .map(
+      (item) =>
+        `<button class="quick-item ${item.code === state.selectedCode ? "is-picked" : ""}" data-code="${item.code}" type="button">${item.name}</button>`
+    )
     .join("");
 }
 
@@ -211,7 +216,7 @@ function selectedCacheData(meta) {
     return null;
   }
 
-  return state.cache.get(`${state.market}:${meta.code}`) || null;
+  return state.cache.get(`${meta.market}:${meta.code}`) || null;
 }
 
 async function loadStockData(meta) {
@@ -219,7 +224,7 @@ async function loadStockData(meta) {
     return;
   }
 
-  const cacheKey = `${state.market}:${meta.code}`;
+  const cacheKey = `${meta.market}:${meta.code}`;
   if (state.cache.has(cacheKey)) {
     state.error = "";
     return;
@@ -231,7 +236,7 @@ async function loadStockData(meta) {
   renderMetrics(null);
 
   try {
-    const endpoint = `/api/stock-data?market=${encodeURIComponent(state.market)}&code=${encodeURIComponent(meta.code)}`;
+    const endpoint = `/api/stock-data?market=${encodeURIComponent(meta.market)}&code=${encodeURIComponent(meta.code)}`;
     const response = await fetch(endpoint);
     const contentType = response.headers.get("content-type") || "";
     if (!response.ok) {
@@ -252,16 +257,62 @@ async function loadStockData(meta) {
   }
 }
 
+async function loadSymbolSearch() {
+  const query = state.query.trim();
+  if (!query) {
+    state.searchResults = [];
+    state.searchError = "";
+    return;
+  }
+
+  const cacheKey = `${state.market}:${query.toLowerCase()}`;
+  if (state.searchCache.has(cacheKey)) {
+    state.searchResults = state.searchCache.get(cacheKey);
+    state.searchError = "";
+    return;
+  }
+
+  const seq = ++state.searchSeq;
+  try {
+    const endpoint = `/api/symbol-search?market=${encodeURIComponent(state.market)}&q=${encodeURIComponent(query)}`;
+    const response = await fetch(endpoint);
+    const contentType = response.headers.get("content-type") || "";
+
+    if (!response.ok) {
+      const raw = await response.text();
+      throw new Error(`API ${response.status} ${raw.slice(0, 80)}`);
+    }
+    if (!contentType.includes("application/json")) {
+      const raw = await response.text();
+      throw new Error(`Non-JSON response: ${raw.slice(0, 80)}`);
+    }
+
+    const payload = await response.json();
+    if (seq !== state.searchSeq) return;
+
+    state.searchResults = Array.isArray(payload.items) ? payload.items : [];
+    state.searchError = "";
+    state.searchCache.set(cacheKey, state.searchResults);
+  } catch (error) {
+    if (seq !== state.searchSeq) return;
+    state.searchError = `종목 검색에 실패했습니다 (${error.message}).`;
+    state.searchResults = [];
+  }
+}
+
 async function renderAll() {
-  const list = filteredList();
-  ensureSelectedSymbol(list);
+  await loadSymbolSearch();
+
+  const list = getCurrentList();
+  ensureSelectedCode(list);
   renderTabs();
   renderSelect(list);
   renderQuickList(list);
 
-  const meta = selectedMeta();
+  const meta = selectedMeta(list);
   if (!meta) {
-    summaryPanel.innerHTML = `<article class="stat"><p class="stat-label">검색 결과 없음</p><p class="stat-value">다른 종목명을 입력해 보세요.</p></article>`;
+    const message = state.searchError || "다른 종목명을 입력해 보세요.";
+    summaryPanel.innerHTML = `<article class="stat"><p class="stat-label">검색 결과 없음</p><p class="stat-value">${message}</p></article>`;
     metricsGrid.innerHTML = "";
     chartCaption.textContent = "";
     chartBox.innerHTML = "";
@@ -279,7 +330,8 @@ marketTabs.forEach((tab) => {
   tab.addEventListener("click", async () => {
     state.market = tab.dataset.market;
     state.query = "";
-    state.symbol = "";
+    state.selectedCode = "";
+    state.searchError = "";
     searchInput.value = "";
     await renderAll();
   });
@@ -287,22 +339,22 @@ marketTabs.forEach((tab) => {
 
 searchInput.addEventListener("input", async (event) => {
   state.query = event.target.value;
-  state.symbol = "";
+  state.selectedCode = "";
   await renderAll();
 });
 
 symbolSelect.addEventListener("change", async (event) => {
-  state.symbol = event.target.value;
+  state.selectedCode = event.target.value;
   await renderAll();
 });
 
 quickList.addEventListener("click", async (event) => {
-  const target = event.target.closest("button[data-symbol]");
+  const target = event.target.closest("button[data-code]");
   if (!target) {
     return;
   }
 
-  state.symbol = target.dataset.symbol;
+  state.selectedCode = target.dataset.code;
   await renderAll();
 });
 

@@ -255,6 +255,52 @@ async function fetchJson(url) {
   return response.json();
 }
 
+function toTvExchange(typeCode, market) {
+  if (market === "KR") {
+    return "KRX";
+  }
+
+  const code = String(typeCode || "").toUpperCase();
+  if (code.includes("NASDAQ")) return "NASDAQ";
+  if (code.includes("NYSE")) return "NYSE";
+  if (code.includes("AMEX")) return "AMEX";
+  return "NASDAQ";
+}
+
+function normalizeSearchItems(rawItems, market) {
+  const targetNation = market === "KR" ? "KOR" : "USA";
+  const seen = new Set();
+  const list = [];
+
+  for (const item of rawItems || []) {
+    if (item?.nationCode !== targetNation) continue;
+    if (String(item?.url || "").includes("/etf/")) continue;
+
+    const isKR = market === "KR";
+    const symbol = item.code;
+    const code = isKR ? item.code : (item.reutersCode || item.code);
+    if (!symbol || !code) continue;
+
+    const uniqueKey = `${market}:${code}`;
+    if (seen.has(uniqueKey)) continue;
+    seen.add(uniqueKey);
+
+    const exchange = item.typeCode || item.typeName || (isKR ? "KRX" : "US");
+    const tvExchange = toTvExchange(exchange, market);
+
+    list.push({
+      market,
+      name: item.name || symbol,
+      symbol,
+      code,
+      exchange,
+      tvSymbol: `${tvExchange}:${symbol}`
+    });
+  }
+
+  return list;
+}
+
 async function handleStockData(request) {
   const url = new URL(request.url);
   const market = (url.searchParams.get("market") || "").toUpperCase();
@@ -288,6 +334,48 @@ async function handleStockData(request) {
   return json(buildPayload({ market, code }, basic, integration, finance));
 }
 
+async function handleSymbolSearch(request) {
+  const url = new URL(request.url);
+  const market = (url.searchParams.get("market") || "").toUpperCase();
+  const q = (url.searchParams.get("q") || "").trim();
+
+  if (!["KR", "US"].includes(market)) {
+    return json({ error: "Invalid market" }, 400);
+  }
+
+  if (!q) {
+    return json({ error: "Query is required" }, 400);
+  }
+
+  const params = new URLSearchParams({
+    q,
+    target: "stock",
+    size: "30",
+    page: "1"
+  });
+
+  const upstream = await fetch(`https://m.stock.naver.com/front-api/search?${params.toString()}`, {
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      Accept: "application/json"
+    }
+  });
+
+  if (!upstream.ok) {
+    throw new Error(`Upstream request failed: ${upstream.status}`);
+  }
+
+  const payload = await upstream.json();
+  const items = normalizeSearchItems(payload?.result?.items || [], market);
+
+  return json({
+    market,
+    query: q,
+    total: items.length,
+    items
+  });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -301,6 +389,14 @@ export default {
         return await handleStockData(request);
       } catch (error) {
         return json({ error: "Failed to load stock data", detail: String(error?.message || error) }, 500);
+      }
+    }
+
+    if (url.pathname === "/api/symbol-search") {
+      try {
+        return await handleSymbolSearch(request);
+      } catch (error) {
+        return json({ error: "Failed to search symbols", detail: String(error?.message || error) }, 500);
       }
     }
 
