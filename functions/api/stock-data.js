@@ -90,26 +90,6 @@ function formatNum(value) {
   return value.toFixed(2);
 }
 
-function resolveConsensusMetrics(info, integration) {
-  const cnsPerRaw = info.cnsPer?.value;
-  const cnsEpsRaw = info.cnsEps?.value;
-  if (cnsPerRaw || cnsEpsRaw) {
-    return { cnsPerRaw, cnsEpsRaw };
-  }
-
-  const targetMean = parseNumber(integration?.consensusInfo?.priceTargetMean);
-  const per = parseNumber(info.per?.value);
-  const eps = parseNumber(info.eps?.value);
-
-  const impliedPer = targetMean != null && eps != null && eps > 0 ? `${(targetMean / eps).toFixed(2)}배 (환산)` : null;
-  const impliedEps = targetMean != null && per != null && per > 0 ? `${(targetMean / per).toFixed(2)} (환산)` : null;
-
-  return {
-    cnsPerRaw: impliedPer,
-    cnsEpsRaw: impliedEps
-  };
-}
-
 function buildPayload(meta, basic, integration, finance) {
   const info = getTotalInfoMap(basic, integration);
 
@@ -117,7 +97,8 @@ function buildPayload(meta, basic, integration, finance) {
   const pbrRaw = info.pbr?.value;
   const epsRaw = info.eps?.value;
   const bpsRaw = info.bps?.value;
-  const { cnsPerRaw, cnsEpsRaw } = resolveConsensusMetrics(info, integration);
+  const cnsPerRaw = info.cnsPer?.value;
+  const cnsEpsRaw = info.cnsEps?.value;
   const dividendYieldRaw = info.dividendYieldRatio?.value;
 
   const per = parseNumber(perRaw);
@@ -174,7 +155,6 @@ function buildPayload(meta, basic, integration, finance) {
         badge: "재무요약 기반",
         metrics: {
           "영업이익률": formatPct(opMargin),
-          "배당수익률": dividendYieldRaw || "N/A",
           "시가총액": info.marketValue?.value || "N/A",
           "거래대금": info.accumulatedTradingValue?.value || "N/A"
         }
@@ -222,7 +202,6 @@ function buildPayload(meta, basic, integration, finance) {
           "시가": info.openPrice?.value || "N/A",
           "고가": info.highPrice?.value || "N/A",
           "저가": info.lowPrice?.value || "N/A",
-          "52W 위치": formatPct(pos52),
           "업데이트": basic?.localTradedAt || "N/A"
         }
       }
