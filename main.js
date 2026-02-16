@@ -21,6 +21,41 @@ const CATEGORY_ORDER = [
   ["technical", "기술지표"]
 ];
 
+const METRIC_HELP_TEXTS = {
+  PER: "주가를 주당순이익(EPS)으로 나눈 값입니다. 낮을수록 이익 대비 주가가 낮다고 해석할 수 있습니다.",
+  PEG: "PER을 이익성장률로 나눈 지표입니다. 성장성을 반영한 밸류에이션 비교에 사용합니다.",
+  PBR: "주가를 주당순자산(BPS)으로 나눈 지표입니다. 장부가치 대비 주가 수준을 봅니다.",
+  EPS: "주당순이익입니다. 기업이 벌어들인 이익을 주식 수로 나눈 값입니다.",
+  BPS: "주당순자산입니다. 기업 순자산을 주식 수로 나눈 값입니다.",
+  "추정PER": "애널리스트 추정 이익 기준 PER입니다. 미래 이익 기대가 반영됩니다.",
+  "추정EPS": "애널리스트가 예상한 주당순이익입니다.",
+  "영업이익률": "매출 대비 영업이익 비율입니다. 본업 수익성의 핵심 지표입니다.",
+  "배당수익률": "현재 주가 대비 1년 배당금 비율입니다.",
+  "시가총액": "기업의 전체 주식 가치입니다. 주가 × 상장주식수로 계산합니다.",
+  "거래대금": "일정 기간 체결된 거래 금액 합계입니다.",
+  "EPS 성장률(추정)": "EPS가 얼마나 증가/감소했는지 비율로 본 값입니다.",
+  "매출 성장률(YoY)": "전년 동기 대비 매출 증가율입니다.",
+  "52주 최고": "최근 52주 동안 가장 높았던 가격입니다.",
+  "52주 최저": "최근 52주 동안 가장 낮았던 가격입니다.",
+  "52주 위치": "현재가가 52주 고점/저점 구간에서 어느 위치인지 백분율로 표시합니다.",
+  "전일 대비": "전일 종가 대비 현재 가격 차이입니다.",
+  "등락률": "전일 종가 대비 가격 변동 비율입니다.",
+  "시장": "해당 종목이 거래되는 거래소 또는 시장 구분입니다.",
+  "영업활동 현금흐름": "영업에서 실제로 들어오고 나간 현금입니다.",
+  "투자활동 현금흐름": "설비·지분 투자 등 투자활동에서 발생한 현금흐름입니다.",
+  "재무활동 현금흐름": "차입, 상환, 배당, 자사주 등 재무활동 현금흐름입니다.",
+  "거래량": "해당 기간 실제로 거래된 주식 수량입니다.",
+  "주당배당금": "주식 1주당 지급되는 배당금입니다.",
+  "배당일": "배당금이 실제 지급되는 날짜입니다.",
+  "배당락일": "배당 권리가 사라져 배당을 받지 못하게 되는 기준일입니다.",
+  "현재가": "가장 최근 체결된 가격입니다.",
+  "시가": "해당 기간 시작 시점 가격입니다.",
+  "고가": "해당 기간 중 가장 높았던 가격입니다.",
+  "저가": "해당 기간 중 가장 낮았던 가격입니다.",
+  "52W 위치": "52주 고점/저점 범위에서 현재가 위치를 나타낸 값입니다.",
+  업데이트: "데이터가 마지막으로 갱신된 시각입니다."
+};
+
 const marketTabs = document.querySelectorAll(".market-tab");
 const searchInput = document.getElementById("symbol-search");
 const symbolSelect = document.getElementById("symbol-select");
@@ -49,6 +84,49 @@ const state = {
 let lwChart = null;
 let candleSeries = null;
 let chartResizeBound = false;
+let metricHelpPopover = null;
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function ensureMetricHelpPopover() {
+  if (metricHelpPopover) return metricHelpPopover;
+
+  metricHelpPopover = document.createElement("div");
+  metricHelpPopover.className = "metric-help-popover is-hidden";
+  metricHelpPopover.setAttribute("role", "dialog");
+  metricHelpPopover.setAttribute("aria-live", "polite");
+  document.body.appendChild(metricHelpPopover);
+  return metricHelpPopover;
+}
+
+function hideMetricHelp() {
+  if (!metricHelpPopover) return;
+  metricHelpPopover.classList.add("is-hidden");
+}
+
+function showMetricHelp(button, label, description) {
+  const pop = ensureMetricHelpPopover();
+  pop.innerHTML = `<p class="metric-help-title">${escapeHtml(label)}</p><p class="metric-help-desc">${escapeHtml(description)}</p>`;
+  pop.classList.remove("is-hidden");
+
+  const rect = button.getBoundingClientRect();
+  const maxWidth = Math.min(340, window.innerWidth - 24);
+  pop.style.maxWidth = `${maxWidth}px`;
+
+  const popRect = pop.getBoundingClientRect();
+  const left = Math.max(12, Math.min(window.innerWidth - popRect.width - 12, rect.left + rect.width / 2 - popRect.width / 2));
+  const top = Math.max(12, rect.bottom + 10);
+
+  pop.style.left = `${left}px`;
+  pop.style.top = `${top}px`;
+}
 
 function getCurrentList() {
   const query = state.query.trim();
@@ -152,7 +230,10 @@ function metricCardTemplate(title, section) {
     .map(
       ([key, value]) => `
       <li class="metric-item">
-        <span class="metric-key">${key}</span>
+        <span class="metric-key-wrap">
+          <span class="metric-key">${key}</span>
+          <button class="metric-help-btn" type="button" data-metric-label="${escapeHtml(key)}" aria-label="${escapeHtml(key)} 설명 보기">?</button>
+        </span>
         <span class="metric-value">${value}</span>
       </li>
     `
@@ -455,6 +536,27 @@ quickList.addEventListener("click", async (event) => {
   state.selectedCode = target.dataset.code;
   await renderAll();
 });
+
+metricsGrid.addEventListener("click", (event) => {
+  const button = event.target.closest("button.metric-help-btn");
+  if (!button) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const label = button.dataset.metricLabel || "";
+  const description = METRIC_HELP_TEXTS[label] || "이 지표는 기업의 가치, 수익성, 성장성, 안정성을 해석하는 데 사용됩니다.";
+  showMetricHelp(button, label, description);
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest(".metric-help-btn")) return;
+  if (event.target.closest(".metric-help-popover")) return;
+  hideMetricHelp();
+});
+
+window.addEventListener("resize", hideMetricHelp);
+window.addEventListener("scroll", hideMetricHelp, true);
 
 window.addEventListener("load", async () => {
   await renderAll();

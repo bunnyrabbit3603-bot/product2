@@ -307,6 +307,58 @@ select {
   font-size: 14px;
 }
 
+.metric-key-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.metric-help-btn {
+  width: 17px;
+  height: 17px;
+  border-radius: 999px;
+  border: 1px solid #ccbda1;
+  background: #fff7e6;
+  color: #77561e;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.metric-help-btn:hover {
+  background: #fbeed2;
+}
+
+.metric-help-popover {
+  position: fixed;
+  z-index: 60;
+  background: #fffdf8;
+  border: 1px solid #d8ccb5;
+  border-radius: 12px;
+  box-shadow: 0 12px 26px rgba(45, 34, 14, 0.18);
+  padding: 10px 12px;
+}
+
+.metric-help-popover.is-hidden {
+  display: none;
+}
+
+.metric-help-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #2f281c;
+}
+
+.metric-help-desc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #564b3b;
+  line-height: 1.45;
+}
+
 .metric-value {
   font-weight: 700;
   color: #231f18;
