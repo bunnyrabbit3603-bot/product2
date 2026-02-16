@@ -270,7 +270,10 @@ function ensureChartInstance() {
     return false;
   }
 
-  if (!lwChart) {
+  const hasCanvas = Boolean(chartBox.querySelector("canvas"));
+  if (!lwChart || !hasCanvas) {
+    lwChart = null;
+    candleSeries = null;
     chartBox.innerHTML = "";
 
     lwChart = window.LightweightCharts.createChart(chartBox, {
@@ -318,7 +321,9 @@ function renderChart(meta, chartData) {
   chartCaption.textContent = `${meta.name} (${meta.symbol})`;
 
   if (state.chartLoading) {
-    chartBox.innerHTML = "<p class='chart-fallback'>차트 데이터를 불러오는 중입니다...</p>";
+    if (!chartBox.querySelector("canvas")) {
+      chartBox.innerHTML = "<p class='chart-fallback'>차트 데이터를 불러오는 중입니다...</p>";
+    }
     return;
   }
 
@@ -408,7 +413,6 @@ async function loadChartData(meta) {
 
   state.chartLoading = true;
   state.chartError = "";
-  renderChart(meta, null);
 
   try {
     const endpoint = `/api/chart-data?market=${encodeURIComponent(meta.market)}&code=${encodeURIComponent(meta.code)}`;
