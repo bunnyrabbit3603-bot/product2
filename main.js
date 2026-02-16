@@ -233,9 +233,14 @@ async function loadStockData(meta) {
   try {
     const endpoint = `/api/stock-data?market=${encodeURIComponent(state.market)}&code=${encodeURIComponent(meta.code)}`;
     const response = await fetch(endpoint);
-
+    const contentType = response.headers.get("content-type") || "";
     if (!response.ok) {
-      throw new Error(`API ${response.status}`);
+      const raw = await response.text();
+      throw new Error(`API ${response.status} ${raw.slice(0, 80)}`);
+    }
+    if (!contentType.includes("application/json")) {
+      const raw = await response.text();
+      throw new Error(`Non-JSON response: ${raw.slice(0, 80)}`);
     }
 
     const payload = await response.json();
