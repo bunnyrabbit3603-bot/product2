@@ -9,3 +9,7 @@
 
 ## 실행
 `index.html`을 브라우저에서 열면 바로 동작합니다.
+
+## Cloudflare 배포
+- 배포 설정: `wrangler.jsonc`
+- 배포 명령: `npx wrangler deploy`
