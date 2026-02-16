@@ -3,6 +3,7 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "GET,OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type"
 };
+const DAILY_INSIGHTS_CACHE = new Map();
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -90,6 +91,12 @@ function formatNum(value) {
   return value.toFixed(2);
 }
 
+function formatSignedPct(value) {
+  if (value == null || !Number.isFinite(value)) return "N/A";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(2)}%`;
+}
+
 function formatPercentString(value) {
   if (value == null) return "N/A";
   const raw = String(value).trim();
@@ -138,6 +145,129 @@ function buildShareholderMetrics(assetType, info, integration) {
     "배당일": info.dividendAt?.value || "N/A",
     "배당락일": info.exDividendAt?.value || "N/A"
   };
+}
+
+function getTodayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function extractPeerCodes(market, integration, currentCode) {
+  const peers = market === "US"
+    ? integration?.industryCompareInfo?.globalStocks
+    : integration?.industryCompareInfo;
+
+  if (!Array.isArray(peers)) return [];
+
+  const seen = new Set();
+  const codes = [];
+  for (const peer of peers) {
+    if (market === "US" && peer?.nationType && peer.nationType !== "USA") continue;
+
+    const code = market === "US"
+      ? (peer?.reutersCode || "")
+      : (peer?.itemCode || peer?.reutersCode || "");
+
+    if (!code || code === currentCode || seen.has(code)) continue;
+    seen.add(code);
+    codes.push(code);
+    if (codes.length >= 8) break;
+  }
+
+  return codes;
+}
+
+async function fetchPeerValuationAverages(market, base, peerCodes) {
+  if (!peerCodes.length) return { avgPer: null, avgPbr: null };
+
+  const settled = await Promise.allSettled(
+    peerCodes.map(async (peerCode) => {
+      const [basic, integration] = await Promise.all([
+        fetchJson(`${base}/${encodeURIComponent(peerCode)}/basic`),
+        fetchJson(`${base}/${encodeURIComponent(peerCode)}/integration`)
+      ]);
+      return { basic, integration };
+    })
+  );
+
+  const perValues = [];
+  const pbrValues = [];
+
+  for (const item of settled) {
+    if (item.status !== "fulfilled") continue;
+    const info = getTotalInfoMap(item.value.basic, item.value.integration);
+    const per = parseNumber(info.per?.value);
+    const pbr = parseNumber(info.pbr?.value);
+    if (per != null) perValues.push(per);
+    if (pbr != null) pbrValues.push(pbr);
+  }
+
+  const avgPer = perValues.length ? perValues.reduce((a, b) => a + b, 0) / perValues.length : null;
+  const avgPbr = pbrValues.length ? pbrValues.reduce((a, b) => a + b, 0) / pbrValues.length : null;
+  return { avgPer, avgPbr };
+}
+
+function buildValuationCompareMetrics(info, avgPer, avgPbr, dateKey) {
+  const per = parseNumber(info.per?.value);
+  const pbr = parseNumber(info.pbr?.value);
+  const perGap = per != null && avgPer != null && avgPer !== 0 ? ((per / avgPer) - 1) * 100 : null;
+  const pbrGap = pbr != null && avgPbr != null && avgPbr !== 0 ? ((pbr / avgPbr) - 1) * 100 : null;
+
+  return {
+    기준일: dateKey,
+    "내 PER": info.per?.value || "N/A",
+    "업종 평균 PER": avgPer == null ? "N/A" : `${avgPer.toFixed(2)}배`,
+    "PER 괴리": formatSignedPct(perGap),
+    "내 PBR": info.pbr?.value || "N/A",
+    "업종 평균 PBR": avgPbr == null ? "N/A" : `${avgPbr.toFixed(2)}배`,
+    "PBR 괴리": formatSignedPct(pbrGap)
+  };
+}
+
+function buildConsensusMetrics(integration, basic, dateKey) {
+  const consensus = integration?.consensusInfo || {};
+  const recommMean = parseNumber(consensus.recommMean);
+  const targetMean = parseNumber(consensus.priceTargetMean);
+  const currentPrice = parseNumber(basic?.closePrice);
+  const upside =
+    targetMean != null && currentPrice != null && currentPrice !== 0
+      ? ((targetMean / currentPrice) - 1) * 100
+      : null;
+
+  return {
+    기준일: consensus.createDate || dateKey,
+    "투자의견 점수": recommMean == null ? "N/A" : recommMean.toFixed(2),
+    "목표가 평균": consensus.priceTargetMean || "N/A",
+    "목표가 상단": consensus.priceTargetHigh || "N/A",
+    "목표가 하단": consensus.priceTargetLow || "N/A",
+    "상승여력(목표가 기준)": formatSignedPct(upside)
+  };
+}
+
+async function getDailyInsights({ market, code, basic, integration, base }) {
+  const dateKey = getTodayKey();
+  const cacheKey = `${dateKey}:${market}:${code}`;
+  const cached = DAILY_INSIGHTS_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const info = getTotalInfoMap(basic, integration);
+  const assetType = detectAssetType(basic);
+
+  let avgPer = null;
+  let avgPbr = null;
+  if (assetType === "STOCK") {
+    const peerCodes = extractPeerCodes(market, integration, code);
+    const averages = await fetchPeerValuationAverages(market, base, peerCodes);
+    avgPer = averages.avgPer;
+    avgPbr = averages.avgPbr;
+  }
+
+  const insights = {
+    valuationCompare: buildValuationCompareMetrics(info, avgPer, avgPbr, dateKey),
+    analystConsensus: buildConsensusMetrics(integration, basic, dateKey)
+  };
+
+  DAILY_INSIGHTS_CACHE.set(cacheKey, insights);
+  return insights;
 }
 
 function toEodhdUsSymbol(symbol) {
@@ -204,7 +334,7 @@ async function fetchUsForwardPe(symbol, apiKey) {
   return null;
 }
 
-function buildPayload(meta, basic, integration, finance, forwardPe) {
+function buildPayload(meta, basic, integration, finance, forwardPe, insights) {
   const info = getTotalInfoMap(basic, integration);
   const assetType = detectAssetType(basic);
   const shareholderMetrics = buildShareholderMetrics(assetType, info, integration);
@@ -289,6 +419,14 @@ function buildPayload(meta, basic, integration, finance, forwardPe) {
       shareholder: {
         badge: assetType === "ETF" ? "ETF 분배" : assetType === "BOND" ? "채권 이자" : "주주환원",
         metrics: shareholderMetrics
+      },
+      comparison: {
+        badge: "일 1회 갱신",
+        metrics: insights?.valuationCompare || {}
+      },
+      consensus: {
+        badge: "일 1회 갱신",
+        metrics: insights?.analystConsensus || {}
       }
     }
   };
@@ -325,7 +463,8 @@ async function handleStockData(requestUrl, env) {
     forwardPe = await fetchUsForwardPe(basic?.symbolCode, env?.EODHD_API_KEY);
   }
 
-  return json(buildPayload({ market, code }, basic, integration, finance, forwardPe));
+  const insights = await getDailyInsights({ market, code, basic, integration, base });
+  return json(buildPayload({ market, code }, basic, integration, finance, forwardPe, insights));
 }
 
 export async function onRequest(context) {

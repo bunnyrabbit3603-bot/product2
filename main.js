@@ -13,6 +13,8 @@ const DEFAULT_STOCKS = {
 
 const CATEGORY_ORDER = [
   ["valuation", "가치지표"],
+  ["comparison", "밸류에이션 비교"],
+  ["consensus", "애널리스트 컨센서스"],
   ["profitability", "수익성"],
   ["growth", "성장성"],
   ["stability", "안정성"],
@@ -27,6 +29,18 @@ const METRIC_HELP_TEXTS = {
   BPS: "주당순자산입니다. 회사 순자산을 주식 수로 나눈 값으로, 기업의 자산 체력을 볼 때 참고합니다.",
   "추정PER": "앞으로 예상되는 이익 기준 PER(FWD PER)입니다. 제공원에 값이 없으면 표시되지 않을 수 있습니다.",
   "추정EPS": "앞으로 예상되는 EPS입니다. 제공원에 값이 없으면 표시되지 않을 수 있습니다.",
+  기준일: "이 카드 데이터가 마지막으로 갱신된 날짜입니다. 하루 1회 갱신됩니다.",
+  "내 PER": "현재 종목의 PER입니다.",
+  "업종 평균 PER": "같은 업종 주요 종목들의 PER 평균입니다.",
+  "PER 괴리": "내 PER가 업종 평균 대비 얼마나 높은지/낮은지입니다. +면 평균보다 높고, -면 낮습니다.",
+  "내 PBR": "현재 종목의 PBR입니다.",
+  "업종 평균 PBR": "같은 업종 주요 종목들의 PBR 평균입니다.",
+  "PBR 괴리": "내 PBR이 업종 평균 대비 얼마나 높은지/낮은지입니다.",
+  "투자의견 점수": "증권사 의견을 점수로 모은 값입니다. 높을수록 긍정 의견이 많은 편입니다.",
+  "목표가 평균": "증권사 목표가의 평균값입니다.",
+  "목표가 상단": "증권사 목표가 중 가장 높은 값입니다.",
+  "목표가 하단": "증권사 목표가 중 가장 낮은 값입니다.",
+  "상승여력(목표가 기준)": "현재가 대비 목표가 평균까지 남은 여유입니다. +면 상승 여유, -면 하락 여지입니다.",
   "영업이익률": "매출에서 영업이익이 차지하는 비율입니다. 높을수록 본업에서 남기는 돈이 많다는 뜻입니다.",
   "배당수익률": "현재 주가 대비 1년 배당 비율입니다. 높을수록 현금 배당 매력이 큰 편입니다.",
   "시가총액": "회사의 전체 몸값입니다. 클수록 대형주, 작을수록 중소형주 성격이 강합니다.",
@@ -266,7 +280,10 @@ function renderMetrics(data) {
     return;
   }
 
-  metricsGrid.innerHTML = CATEGORY_ORDER.map(([key, title]) => metricCardTemplate(title, data.sections[key])).join("");
+  metricsGrid.innerHTML = CATEGORY_ORDER
+    .filter(([key]) => data.sections && data.sections[key] && data.sections[key].metrics)
+    .map(([key, title]) => metricCardTemplate(title, data.sections[key]))
+    .join("");
 }
 
 function ensureChartInstance() {
