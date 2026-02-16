@@ -165,7 +165,10 @@ function renderSelect(list) {
   }
 
   symbolSelect.innerHTML = list
-    .map((item) => `<option value="${item.code}">${item.name} (${item.symbol})</option>`)
+    .map((item) => {
+      const symbol = String(item.symbol || "").trim();
+      return `<option value="${item.code}">${item.name}${symbol ? ` (${symbol})` : ""}</option>`;
+    })
     .join("");
   symbolSelect.value = state.selectedCode;
 }
@@ -198,11 +201,14 @@ function renderSummary(data, meta) {
 
   const quote = data.quote;
   const trendClass = String(quote.change).startsWith("-") ? "down" : "up";
+  const symbolText = String(quote.symbol || "").trim();
+  const exchangeText = String(quote.exchange || meta.exchange || "").trim();
+  const nameMetaText = symbolText ? `${symbolText}${exchangeText ? ` · ${exchangeText}` : ""}` : exchangeText;
 
   summaryPanel.innerHTML = `
     <article class="stat">
       <p class="stat-label">종목</p>
-      <p class="stat-value">${quote.name} <span class="stat-sub">(${quote.symbol} · ${quote.exchange || meta.exchange})</span></p>
+      <p class="stat-value">${quote.name}${nameMetaText ? ` <span class="stat-sub">(${nameMetaText})</span>` : ""}</p>
       <p class="stat-sub">업데이트 ${quote.updatedAt}</p>
     </article>
     <article class="stat">
