@@ -33,7 +33,8 @@ function normalizeItems(rawItems, market) {
   const list = [];
   for (const item of rawItems || []) {
     if (item?.nationCode !== targetNation) continue;
-    if (String(item?.url || "").includes("/etf/")) continue;
+    const url = String(item?.url || "");
+    if (!(url.includes("/stock/") || url.includes("/etf/") || url.includes("/bond/"))) continue;
 
     const isKR = market === "KR";
     const symbol = isKR ? item.code : item.code;
@@ -46,6 +47,11 @@ function normalizeItems(rawItems, market) {
 
     const exchange = item.typeCode || item.typeName || (isKR ? "KRX" : "US");
     const tvExchange = toTvExchange(exchange, market);
+    const assetType = url.includes("/etf/")
+      ? "ETF"
+      : url.includes("/bond/")
+        ? "BOND"
+        : "STOCK";
 
     list.push({
       market,
@@ -53,6 +59,7 @@ function normalizeItems(rawItems, market) {
       symbol,
       code,
       exchange,
+      assetType,
       tvSymbol: `${tvExchange}:${symbol}`
     });
   }

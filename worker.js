@@ -120,6 +120,56 @@ function formatNum(value) {
   return value.toFixed(2);
 }
 
+function formatPercentString(value) {
+  if (value == null) return "N/A";
+  const raw = String(value).trim();
+  if (!raw) return "N/A";
+  if (raw.endsWith("%")) return raw;
+  const num = Number(raw);
+  return Number.isFinite(num) ? `${num.toFixed(2)}%` : raw;
+}
+
+function detectAssetType(basic) {
+  const endType = String(basic?.stockEndType || "").toLowerCase();
+  if (endType.includes("etf")) return "ETF";
+  if (endType.includes("bond")) return "BOND";
+
+  const name = String(basic?.stockName || "");
+  if (name.includes("채권")) return "BOND";
+  return "STOCK";
+}
+
+function buildShareholderMetrics(assetType, info, integration) {
+  if (assetType === "ETF") {
+    const distYield =
+      info.dividendYieldRatio?.value ||
+      formatPercentString(integration?.etfKeyIndicator?.dividendYieldTtm);
+
+    return {
+      "분배수익률": distYield || "N/A",
+      "주당분배금": info.dividend?.value || "N/A",
+      "분배일": info.dividendAt?.value || "N/A",
+      "분배락일": info.exDividendAt?.value || "N/A"
+    };
+  }
+
+  if (assetType === "BOND") {
+    return {
+      "이자수익률": info.dividendYieldRatio?.value || "N/A",
+      "표면금리": info.couponRate?.value || "N/A",
+      "이자지급일": info.dividendAt?.value || "N/A",
+      "만기일": info.maturityAt?.value || "N/A"
+    };
+  }
+
+  return {
+    "배당수익률": info.dividendYieldRatio?.value || "N/A",
+    "주당배당금": info.dividend?.value || "N/A",
+    "배당일": info.dividendAt?.value || "N/A",
+    "배당락일": info.exDividendAt?.value || "N/A"
+  };
+}
+
 function toEodhdUsSymbol(symbol) {
   const raw = String(symbol || "").trim().toUpperCase();
   if (!raw) return "";
@@ -186,6 +236,8 @@ async function fetchUsForwardPe(symbol, apiKey) {
 
 function buildPayload(meta, basic, integration, finance, forwardPe) {
   const info = getTotalInfoMap(basic, integration);
+  const assetType = detectAssetType(basic);
+  const shareholderMetrics = buildShareholderMetrics(assetType, info, integration);
 
   const perRaw = info.per?.value;
   const pbrRaw = info.pbr?.value;
@@ -193,8 +245,6 @@ function buildPayload(meta, basic, integration, finance, forwardPe) {
   const bpsRaw = info.bps?.value;
   const cnsPerRaw = forwardPe != null ? `${forwardPe.toFixed(2)}배` : info.cnsPer?.value;
   const cnsEpsRaw = info.cnsEps?.value;
-  const dividendYieldRaw = info.dividendYieldRatio?.value;
-
   const per = parseNumber(perRaw);
   const epsGrowth = calcEpsGrowth(finance);
   const peg = per != null && epsGrowth != null && epsGrowth > 0 ? per / epsGrowth : null;
@@ -267,13 +317,8 @@ function buildPayload(meta, basic, integration, finance, forwardPe) {
         }
       },
       shareholder: {
-        badge: "주주환원",
-        metrics: {
-          "배당수익률": dividendYieldRaw || "N/A",
-          "주당배당금": info.dividend?.value || "N/A",
-          "배당일": info.dividendAt?.value || "N/A",
-          "배당락일": info.exDividendAt?.value || "N/A"
-        }
+        badge: assetType === "ETF" ? "ETF 분배" : assetType === "BOND" ? "채권 이자" : "주주환원",
+        metrics: shareholderMetrics
       }
     }
   };
@@ -352,7 +397,8 @@ function normalizeSearchItems(rawItems, market) {
 
   for (const item of rawItems || []) {
     if (item?.nationCode !== targetNation) continue;
-    if (String(item?.url || "").includes("/etf/")) continue;
+    const url = String(item?.url || "");
+    if (!(url.includes("/stock/") || url.includes("/etf/") || url.includes("/bond/"))) continue;
 
     const isKR = market === "KR";
     const symbol = item.code;
@@ -365,6 +411,11 @@ function normalizeSearchItems(rawItems, market) {
 
     const exchange = item.typeCode || item.typeName || (isKR ? "KRX" : "US");
     const tvExchange = toTvExchange(exchange, market);
+    const assetType = url.includes("/etf/")
+      ? "ETF"
+      : url.includes("/bond/")
+        ? "BOND"
+        : "STOCK";
 
     list.push({
       market,
@@ -372,6 +423,7 @@ function normalizeSearchItems(rawItems, market) {
       symbol,
       code,
       exchange,
+      assetType,
       tvSymbol: `${tvExchange}:${symbol}`
     });
   }
