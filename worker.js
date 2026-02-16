@@ -210,11 +210,6 @@ function buildPayload(meta, basic, integration, finance, forwardPe) {
       ? ((priceNow - low52) / (high52 - low52)) * 100
       : null;
 
-  const cashAnnualCols = finance?.chartCashFlow?.annual?.columns || [];
-  const operatingCash = findRowValue(cashAnnualCols, ["영업활동 현금흐름", "Operating Cash Flow"]).at(-1);
-  const investingCash = findRowValue(cashAnnualCols, ["투자활동 현금흐름", "Investing Cash Flow"]).at(-1);
-  const financingCash = findRowValue(cashAnnualCols, ["재무활동 현금흐름", "Financing Cash Flow"]).at(-1);
-
   const change = basic?.fluctuationsRatio ? `${basic.fluctuationsRatio}%` : "N/A";
   const point = basic?.compareToPreviousClosePrice ?? "N/A";
 
@@ -271,15 +266,6 @@ function buildPayload(meta, basic, integration, finance, forwardPe) {
           "시장": basic?.stockExchangeName || "N/A"
         }
       },
-      cashflow: {
-        badge: "연간 현금흐름",
-        metrics: {
-          "영업활동 현금흐름": operatingCash == null ? "N/A" : `${operatingCash}`,
-          "투자활동 현금흐름": investingCash == null ? "N/A" : `${investingCash}`,
-          "재무활동 현금흐름": financingCash == null ? "N/A" : `${financingCash}`,
-          "거래량": info.accumulatedTradingVolume?.value || "N/A"
-        }
-      },
       shareholder: {
         badge: "주주환원",
         metrics: {
@@ -287,16 +273,6 @@ function buildPayload(meta, basic, integration, finance, forwardPe) {
           "주당배당금": info.dividend?.value || "N/A",
           "배당일": info.dividendAt?.value || "N/A",
           "배당락일": info.exDividendAt?.value || "N/A"
-        }
-      },
-      technical: {
-        badge: "가격 기반",
-        metrics: {
-          "현재가": basic?.closePrice || "N/A",
-          "시가": info.openPrice?.value || "N/A",
-          "고가": info.highPrice?.value || "N/A",
-          "저가": info.lowPrice?.value || "N/A",
-          "업데이트": basic?.localTradedAt || "N/A"
         }
       }
     }
