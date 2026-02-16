@@ -255,6 +255,46 @@ async function fetchJson(url) {
   return response.json();
 }
 
+function pad(num) {
+  return String(num).padStart(2, "0");
+}
+
+function formatDateTime(date) {
+  return (
+    `${date.getUTCFullYear()}` +
+    `${pad(date.getUTCMonth() + 1)}` +
+    `${pad(date.getUTCDate())}` +
+    `${pad(date.getUTCHours())}` +
+    `${pad(date.getUTCMinutes())}`
+  );
+}
+
+function parseLocalDate(value) {
+  const raw = String(value || "");
+  if (!/^\d{8}$/.test(raw)) return null;
+
+  const y = Number(raw.slice(0, 4));
+  const m = Number(raw.slice(4, 6)) - 1;
+  const d = Number(raw.slice(6, 8));
+
+  return Math.floor(Date.UTC(y, m, d, 0, 0, 0) / 1000);
+}
+
+function toOhlcPoint(row) {
+  const time = parseLocalDate(row?.localDate);
+  const open = Number(row?.openPrice);
+  const high = Number(row?.highPrice);
+  const low = Number(row?.lowPrice);
+  const close = Number(row?.closePrice);
+  const volume = Number(row?.accumulatedTradingVolume || 0);
+
+  if (!time || !Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
+    return null;
+  }
+
+  return { time, open, high, low, close, volume };
+}
+
 function toTvExchange(typeCode, market) {
   if (market === "KR") {
     return "KRX";
@@ -376,6 +416,39 @@ async function handleSymbolSearch(request) {
   });
 }
 
+async function handleChartData(request) {
+  const url = new URL(request.url);
+  const market = (url.searchParams.get("market") || "").toUpperCase();
+  const code = (url.searchParams.get("code") || "").trim();
+
+  if (!["KR", "US"].includes(market)) {
+    return json({ error: "Invalid market" }, 400);
+  }
+
+  if (!/^[A-Za-z0-9.]+$/.test(code)) {
+    return json({ error: "Invalid code" }, 400);
+  }
+
+  const end = new Date();
+  const start = new Date(end.getTime() - 1000 * 60 * 60 * 24 * 450);
+  const startDateTime = formatDateTime(start);
+  const endDateTime = formatDateTime(end);
+
+  const path = market === "KR" ? `domestic/item/${code}/day` : `foreign/item/${code}/day`;
+  const chartUrl = `https://api.stock.naver.com/chart/${path}?startDateTime=${startDateTime}&endDateTime=${endDateTime}`;
+  const payload = await fetchJson(chartUrl);
+
+  const rows = Array.isArray(payload) ? payload : [];
+  const points = rows.map(toOhlcPoint).filter(Boolean);
+
+  return json({
+    market,
+    code,
+    interval: "day",
+    points
+  });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -397,6 +470,14 @@ export default {
         return await handleSymbolSearch(request);
       } catch (error) {
         return json({ error: "Failed to search symbols", detail: String(error?.message || error) }, 500);
+      }
+    }
+
+    if (url.pathname === "/api/chart-data") {
+      try {
+        return await handleChartData(request);
+      } catch (error) {
+        return json({ error: "Failed to load chart data", detail: String(error?.message || error) }, 500);
       }
     }
 

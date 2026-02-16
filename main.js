@@ -35,13 +35,20 @@ const state = {
   query: "",
   selectedCode: "",
   cache: new Map(),
+  chartCache: new Map(),
   loading: false,
+  chartLoading: false,
   error: "",
+  chartError: "",
   searchResults: [],
   searchError: "",
   searchCache: new Map(),
   searchSeq: 0
 };
+
+let lwChart = null;
+let candleSeries = null;
+let chartResizeBound = false;
 
 function getCurrentList() {
   const query = state.query.trim();
@@ -177,38 +184,80 @@ function renderMetrics(data) {
   metricsGrid.innerHTML = CATEGORY_ORDER.map(([key, title]) => metricCardTemplate(title, data.sections[key])).join("");
 }
 
-function renderChart(meta) {
-  chartCaption.textContent = `${meta.name} (${meta.tvSymbol})`;
+function ensureChartInstance() {
+  if (!window.LightweightCharts || typeof window.LightweightCharts.createChart !== "function") {
+    return false;
+  }
 
-  if (!window.TradingView || typeof window.TradingView.widget !== "function") {
-    chartBox.innerHTML = "<p class='chart-fallback'>차트 스크립트 로딩 중입니다. 잠시 후 다시 확인하세요.</p>";
+  if (!lwChart) {
+    chartBox.innerHTML = "";
+
+    lwChart = window.LightweightCharts.createChart(chartBox, {
+      width: chartBox.clientWidth || 800,
+      height: 440,
+      layout: {
+        background: { color: "#ffffff" },
+        textColor: "#2a2a2a"
+      },
+      rightPriceScale: {
+        borderColor: "#e5decf"
+      },
+      timeScale: {
+        borderColor: "#e5decf",
+        timeVisible: false
+      },
+      grid: {
+        vertLines: { color: "#f2ecdf" },
+        horzLines: { color: "#f2ecdf" }
+      }
+    });
+
+    candleSeries = lwChart.addCandlestickSeries({
+      upColor: "#1f9d55",
+      downColor: "#d64545",
+      wickUpColor: "#1f9d55",
+      wickDownColor: "#d64545",
+      borderVisible: false
+    });
+
+    if (!chartResizeBound) {
+      window.addEventListener("resize", () => {
+        if (lwChart) {
+          lwChart.applyOptions({ width: chartBox.clientWidth || 800 });
+        }
+      });
+      chartResizeBound = true;
+    }
+  }
+
+  return true;
+}
+
+function renderChart(meta, chartData) {
+  chartCaption.textContent = `${meta.name} (${meta.symbol})`;
+
+  if (state.chartLoading) {
+    chartBox.innerHTML = "<p class='chart-fallback'>차트 데이터를 불러오는 중입니다...</p>";
     return;
   }
 
-  chartBox.innerHTML = "";
-  const innerId = "tv-chart-inner";
-  const inner = document.createElement("div");
-  inner.id = innerId;
-  inner.style.height = "440px";
-  chartBox.appendChild(inner);
+  if (state.chartError) {
+    chartBox.innerHTML = `<p class='chart-fallback'>${state.chartError}</p>`;
+    return;
+  }
 
-  new window.TradingView.widget({
-    width: "100%",
-    height: 440,
-    symbol: meta.tvSymbol,
-    interval: "D",
-    timezone: "Asia/Seoul",
-    theme: "light",
-    style: "1",
-    locale: "kr",
-    toolbar_bg: "#f8f5ed",
-    enable_publishing: false,
-    hide_top_toolbar: false,
-    hide_legend: false,
-    save_image: false,
-    studies: ["MACD@tv-basicstudies", "RSI@tv-basicstudies", "MASimple@tv-basicstudies"],
-    container_id: innerId
-  });
+  if (!chartData || !Array.isArray(chartData.points) || chartData.points.length === 0) {
+    chartBox.innerHTML = "<p class='chart-fallback'>표시할 차트 데이터가 없습니다.</p>";
+    return;
+  }
+
+  if (!ensureChartInstance()) {
+    chartBox.innerHTML = "<p class='chart-fallback'>차트 라이브러리를 불러오지 못했습니다.</p>";
+    return;
+  }
+
+  candleSeries.setData(chartData.points);
+  lwChart.timeScale().fitContent();
 }
 
 function selectedCacheData(meta) {
@@ -217,6 +266,14 @@ function selectedCacheData(meta) {
   }
 
   return state.cache.get(`${meta.market}:${meta.code}`) || null;
+}
+
+function selectedChartCache(meta) {
+  if (!meta) {
+    return null;
+  }
+
+  return state.chartCache.get(`${meta.market}:${meta.code}`) || null;
 }
 
 async function loadStockData(meta) {
@@ -254,6 +311,44 @@ async function loadStockData(meta) {
     state.error = `실시간 데이터를 불러오지 못했습니다 (${error.message}).`;
   } finally {
     state.loading = false;
+  }
+}
+
+async function loadChartData(meta) {
+  if (!meta) {
+    return;
+  }
+
+  const cacheKey = `${meta.market}:${meta.code}`;
+  if (state.chartCache.has(cacheKey)) {
+    state.chartError = "";
+    return;
+  }
+
+  state.chartLoading = true;
+  state.chartError = "";
+  renderChart(meta, null);
+
+  try {
+    const endpoint = `/api/chart-data?market=${encodeURIComponent(meta.market)}&code=${encodeURIComponent(meta.code)}`;
+    const response = await fetch(endpoint);
+    const contentType = response.headers.get("content-type") || "";
+
+    if (!response.ok) {
+      const raw = await response.text();
+      throw new Error(`API ${response.status} ${raw.slice(0, 80)}`);
+    }
+    if (!contentType.includes("application/json")) {
+      const raw = await response.text();
+      throw new Error(`Non-JSON response: ${raw.slice(0, 80)}`);
+    }
+
+    const payload = await response.json();
+    state.chartCache.set(cacheKey, payload);
+  } catch (error) {
+    state.chartError = `차트 데이터를 불러오지 못했습니다 (${error.message}).`;
+  } finally {
+    state.chartLoading = false;
   }
 }
 
@@ -319,11 +414,14 @@ async function renderAll() {
     return;
   }
 
-  renderChart(meta);
-  await loadStockData(meta);
+  await Promise.all([loadStockData(meta), loadChartData(meta)]);
+
   const data = selectedCacheData(meta);
+  const chartData = selectedChartCache(meta);
+
   renderSummary(data, meta);
   renderMetrics(data);
+  renderChart(meta, chartData);
 }
 
 marketTabs.forEach((tab) => {
