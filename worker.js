@@ -371,8 +371,6 @@ function buildPayload(meta, basic, integration, finance, forwardPe, insights) {
 
   const perRaw = info.per?.value;
   const pbrRaw = info.pbr?.value;
-  const epsRaw = info.eps?.value;
-  const bpsRaw = info.bps?.value;
   const cnsPerRaw = forwardPe != null ? `${forwardPe.toFixed(2)}배` : info.cnsPer?.value;
   const cnsEpsRaw = info.cnsEps?.value;
   const per = parseNumber(perRaw);
@@ -414,8 +412,6 @@ function buildPayload(meta, basic, integration, finance, forwardPe, insights) {
           PER: perRaw || "N/A",
           PEG: formatNum(peg),
           PBR: pbrRaw || "N/A",
-          EPS: epsRaw || "N/A",
-          BPS: bpsRaw || "N/A",
           "추정PER": cnsPerRaw || "N/A",
           "추정EPS": cnsEpsRaw || "N/A"
         }
