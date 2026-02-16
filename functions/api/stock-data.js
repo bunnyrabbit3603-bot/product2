@@ -90,6 +90,26 @@ function formatNum(value) {
   return value.toFixed(2);
 }
 
+function resolveConsensusMetrics(info, integration) {
+  const cnsPerRaw = info.cnsPer?.value;
+  const cnsEpsRaw = info.cnsEps?.value;
+  if (cnsPerRaw || cnsEpsRaw) {
+    return { cnsPerRaw, cnsEpsRaw };
+  }
+
+  const targetMean = parseNumber(integration?.consensusInfo?.priceTargetMean);
+  const per = parseNumber(info.per?.value);
+  const eps = parseNumber(info.eps?.value);
+
+  const impliedPer = targetMean != null && eps != null && eps > 0 ? `${(targetMean / eps).toFixed(2)}배 (환산)` : null;
+  const impliedEps = targetMean != null && per != null && per > 0 ? `${(targetMean / per).toFixed(2)} (환산)` : null;
+
+  return {
+    cnsPerRaw: impliedPer,
+    cnsEpsRaw: impliedEps
+  };
+}
+
 function buildPayload(meta, basic, integration, finance) {
   const info = getTotalInfoMap(basic, integration);
 
@@ -97,8 +117,7 @@ function buildPayload(meta, basic, integration, finance) {
   const pbrRaw = info.pbr?.value;
   const epsRaw = info.eps?.value;
   const bpsRaw = info.bps?.value;
-  const cnsPerRaw = info.cnsPer?.value;
-  const cnsEpsRaw = info.cnsEps?.value;
+  const { cnsPerRaw, cnsEpsRaw } = resolveConsensusMetrics(info, integration);
   const dividendYieldRaw = info.dividendYieldRatio?.value;
 
   const per = parseNumber(perRaw);
