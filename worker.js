@@ -120,14 +120,37 @@ function formatNum(value) {
   return value.toFixed(2);
 }
 
-function buildPayload(meta, basic, integration, finance) {
+async function fetchUsForwardPe(symbol, apiKey) {
+  if (!symbol) return null;
+
+  const key = apiKey || "demo";
+  const params = new URLSearchParams({
+    symbol,
+    apikey: key
+  });
+
+  const response = await fetch(`https://api.twelvedata.com/statistics?${params.toString()}`, {
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) return null;
+  const payload = await response.json();
+  const raw = payload?.statistics?.valuations_metrics?.forward_pe;
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : null;
+}
+
+function buildPayload(meta, basic, integration, finance, forwardPe) {
   const info = getTotalInfoMap(basic, integration);
 
   const perRaw = info.per?.value;
   const pbrRaw = info.pbr?.value;
   const epsRaw = info.eps?.value;
   const bpsRaw = info.bps?.value;
-  const cnsPerRaw = info.cnsPer?.value;
+  const cnsPerRaw = forwardPe != null ? `${forwardPe.toFixed(2)}배` : info.cnsPer?.value;
   const cnsEpsRaw = info.cnsEps?.value;
   const dividendYieldRaw = info.dividendYieldRatio?.value;
 
@@ -339,7 +362,7 @@ function normalizeSearchItems(rawItems, market) {
   return list;
 }
 
-async function handleStockData(request) {
+async function handleStockData(request, env) {
   const url = new URL(request.url);
   const market = (url.searchParams.get("market") || "").toUpperCase();
   const code = url.searchParams.get("code") || "";
@@ -369,7 +392,12 @@ async function handleStockData(request) {
     return json({ error: "Symbol not found" }, 404);
   }
 
-  return json(buildPayload({ market, code }, basic, integration, finance));
+  let forwardPe = null;
+  if (market === "US") {
+    forwardPe = await fetchUsForwardPe(basic?.symbolCode, env?.TWELVE_DATA_API_KEY);
+  }
+
+  return json(buildPayload({ market, code }, basic, integration, finance, forwardPe));
 }
 
 async function handleSymbolSearch(request) {
@@ -457,7 +485,7 @@ export default {
 
     if (url.pathname === "/api/stock-data") {
       try {
-        return await handleStockData(request);
+        return await handleStockData(request, env);
       } catch (error) {
         return json({ error: "Failed to load stock data", detail: String(error?.message || error) }, 500);
       }

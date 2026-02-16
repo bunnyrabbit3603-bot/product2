@@ -90,14 +90,37 @@ function formatNum(value) {
   return value.toFixed(2);
 }
 
-function buildPayload(meta, basic, integration, finance) {
+async function fetchUsForwardPe(symbol, apiKey) {
+  if (!symbol) return null;
+
+  const key = apiKey || "demo";
+  const params = new URLSearchParams({
+    symbol,
+    apikey: key
+  });
+
+  const response = await fetch(`https://api.twelvedata.com/statistics?${params.toString()}`, {
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) return null;
+  const payload = await response.json();
+  const raw = payload?.statistics?.valuations_metrics?.forward_pe;
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : null;
+}
+
+function buildPayload(meta, basic, integration, finance, forwardPe) {
   const info = getTotalInfoMap(basic, integration);
 
   const perRaw = info.per?.value;
   const pbrRaw = info.pbr?.value;
   const epsRaw = info.eps?.value;
   const bpsRaw = info.bps?.value;
-  const cnsPerRaw = info.cnsPer?.value;
+  const cnsPerRaw = forwardPe != null ? `${forwardPe.toFixed(2)}배` : info.cnsPer?.value;
   const cnsEpsRaw = info.cnsEps?.value;
   const dividendYieldRaw = info.dividendYieldRatio?.value;
 
@@ -217,7 +240,7 @@ async function fetchJson(url) {
   return response.json();
 }
 
-async function handleStockData(requestUrl) {
+async function handleStockData(requestUrl, env) {
   const market = (requestUrl.searchParams.get("market") || "").toUpperCase();
   const code = requestUrl.searchParams.get("code") || "";
 
@@ -235,11 +258,16 @@ async function handleStockData(requestUrl) {
 
   if (basic?.code === "StockConflict") return json({ error: "Symbol not found" }, 404);
 
-  return json(buildPayload({ market, code }, basic, integration, finance));
+  let forwardPe = null;
+  if (market === "US") {
+    forwardPe = await fetchUsForwardPe(basic?.symbolCode, env?.TWELVE_DATA_API_KEY);
+  }
+
+  return json(buildPayload({ market, code }, basic, integration, finance, forwardPe));
 }
 
 export async function onRequest(context) {
-  const { request } = context;
+  const { request, env } = context;
   const url = new URL(request.url);
 
   if (request.method === "OPTIONS") {
@@ -247,7 +275,7 @@ export async function onRequest(context) {
   }
 
   try {
-    return await handleStockData(url);
+    return await handleStockData(url, env);
   } catch (error) {
     return json({ error: "Failed to load stock data", detail: String(error?.message || error) }, 500);
   }
