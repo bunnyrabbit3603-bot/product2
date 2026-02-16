@@ -1,15 +1,12 @@
-const DEFAULT_STOCKS = {
-  KR: [
-    { code: "005930", symbol: "005930", name: "삼성전자", exchange: "KRX", tvSymbol: "KRX:005930", market: "KR" },
-    { code: "000660", symbol: "000660", name: "SK하이닉스", exchange: "KRX", tvSymbol: "KRX:000660", market: "KR" },
-    { code: "035420", symbol: "035420", name: "NAVER", exchange: "KRX", tvSymbol: "KRX:035420", market: "KR" }
-  ],
-  US: [
-    { code: "AAPL.O", symbol: "AAPL", name: "Apple", exchange: "NASDAQ", tvSymbol: "NASDAQ:AAPL", market: "US" },
-    { code: "MSFT.O", symbol: "MSFT", name: "Microsoft", exchange: "NASDAQ", tvSymbol: "NASDAQ:MSFT", market: "US" },
-    { code: "NVDA.O", symbol: "NVDA", name: "NVIDIA", exchange: "NASDAQ", tvSymbol: "NASDAQ:NVDA", market: "US" }
-  ]
-};
+const DEFAULT_STOCKS = [
+  { code: "005930", symbol: "005930", name: "삼성전자", exchange: "KRX", tvSymbol: "KRX:005930", market: "KR" },
+  { code: "000660", symbol: "000660", name: "SK하이닉스", exchange: "KRX", tvSymbol: "KRX:000660", market: "KR" },
+  { code: "035420", symbol: "035420", name: "NAVER", exchange: "KRX", tvSymbol: "KRX:035420", market: "KR" },
+  { code: "AAPL.O", symbol: "AAPL", name: "Apple", exchange: "NASDAQ", tvSymbol: "NASDAQ:AAPL", market: "US" },
+  { code: "MSFT.O", symbol: "MSFT", name: "Microsoft", exchange: "NASDAQ", tvSymbol: "NASDAQ:MSFT", market: "US" },
+  { code: "NVDA.O", symbol: "NVDA", name: "NVIDIA", exchange: "NASDAQ", tvSymbol: "NASDAQ:NVDA", market: "US" }
+];
+const SEARCH_MARKETS = ["KR", "US"];
 
 const CATEGORY_ORDER = [
   ["valuation", "가치지표"],
@@ -66,7 +63,6 @@ const METRIC_HELP_TEXTS = {
   업데이트: "데이터가 마지막으로 갱신된 시각입니다."
 };
 
-const marketTabs = document.querySelectorAll(".market-tab");
 const searchInput = document.getElementById("symbol-search");
 const symbolSelect = document.getElementById("symbol-select");
 const quickList = document.getElementById("quick-list");
@@ -76,7 +72,6 @@ const chartCaption = document.getElementById("chart-caption");
 const chartBox = document.getElementById("tv-chart");
 
 const state = {
-  market: "KR",
   query: "",
   selectedCode: "",
   cache: new Map(),
@@ -141,9 +136,13 @@ function showMetricHelp(button, label, description) {
 function getCurrentList() {
   const query = state.query.trim();
   if (!query) {
-    return DEFAULT_STOCKS[state.market] || [];
+    return DEFAULT_STOCKS;
   }
   return state.searchResults;
+}
+
+function itemKey(item) {
+  return `${item.market}:${item.code}`;
 }
 
 function ensureSelectedCode(list) {
@@ -152,21 +151,13 @@ function ensureSelectedCode(list) {
     return;
   }
 
-  if (!list.some((item) => item.code === state.selectedCode)) {
-    state.selectedCode = list[0].code;
+  if (!list.some((item) => itemKey(item) === state.selectedCode)) {
+    state.selectedCode = itemKey(list[0]);
   }
 }
 
 function selectedMeta(list) {
-  return list.find((item) => item.code === state.selectedCode) || null;
-}
-
-function renderTabs() {
-  marketTabs.forEach((tab) => {
-    const active = tab.dataset.market === state.market;
-    tab.classList.toggle("is-active", active);
-    tab.setAttribute("aria-selected", String(active));
-  });
+  return list.find((item) => itemKey(item) === state.selectedCode) || null;
 }
 
 function renderSelect(list) {
@@ -179,7 +170,7 @@ function renderSelect(list) {
   symbolSelect.innerHTML = list
     .map((item) => {
       const symbol = String(item.symbol || "").trim();
-      return `<option value="${item.code}">${item.name}${symbol ? ` (${symbol})` : ""}</option>`;
+      return `<option value="${itemKey(item)}">[${item.market}] ${item.name}${symbol ? ` (${symbol})` : ""}</option>`;
     })
     .join("");
   symbolSelect.value = state.selectedCode;
@@ -190,7 +181,7 @@ function renderQuickList(list) {
     .slice(0, 6)
     .map(
       (item) =>
-        `<button class="quick-item ${item.code === state.selectedCode ? "is-picked" : ""}" data-code="${item.code}" type="button">${item.name}</button>`
+        `<button class="quick-item ${itemKey(item) === state.selectedCode ? "is-picked" : ""}" data-code="${item.code}" data-market="${item.market}" type="button">${item.name}</button>`
     )
     .join("");
 }
@@ -464,7 +455,7 @@ async function loadSymbolSearch() {
     return;
   }
 
-  const cacheKey = `${state.market}:${query.toLowerCase()}`;
+  const cacheKey = query.toLowerCase();
   if (state.searchCache.has(cacheKey)) {
     state.searchResults = state.searchCache.get(cacheKey);
     state.searchError = "";
@@ -473,23 +464,46 @@ async function loadSymbolSearch() {
 
   const seq = ++state.searchSeq;
   try {
-    const endpoint = `/api/symbol-search?market=${encodeURIComponent(state.market)}&q=${encodeURIComponent(query)}`;
-    const response = await fetch(endpoint);
-    const contentType = response.headers.get("content-type") || "";
+    const settled = await Promise.allSettled(
+      SEARCH_MARKETS.map(async (market) => {
+        const endpoint = `/api/symbol-search?market=${encodeURIComponent(market)}&q=${encodeURIComponent(query)}`;
+        const response = await fetch(endpoint);
+        const contentType = response.headers.get("content-type") || "";
+        if (!response.ok) {
+          const raw = await response.text();
+          throw new Error(`${market} API ${response.status} ${raw.slice(0, 80)}`);
+        }
+        if (!contentType.includes("application/json")) {
+          const raw = await response.text();
+          throw new Error(`${market} Non-JSON response: ${raw.slice(0, 80)}`);
+        }
+        const payload = await response.json();
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        return items.map((item) => ({ ...item, market: item.market || market }));
+      })
+    );
 
-    if (!response.ok) {
-      const raw = await response.text();
-      throw new Error(`API ${response.status} ${raw.slice(0, 80)}`);
-    }
-    if (!contentType.includes("application/json")) {
-      const raw = await response.text();
-      throw new Error(`Non-JSON response: ${raw.slice(0, 80)}`);
+    const hasSuccess = settled.some((item) => item.status === "fulfilled");
+    if (!hasSuccess) {
+      const firstError = settled.find((item) => item.status === "rejected");
+      throw firstError?.reason || new Error("종목 검색 실패");
     }
 
-    const payload = await response.json();
+    const seen = new Set();
+    const merged = [];
+    for (const result of settled) {
+      if (result.status !== "fulfilled") continue;
+      for (const item of result.value) {
+        const key = itemKey(item);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(item);
+      }
+    }
+
     if (seq !== state.searchSeq) return;
 
-    state.searchResults = Array.isArray(payload.items) ? payload.items : [];
+    state.searchResults = merged;
     state.searchError = "";
     state.searchCache.set(cacheKey, state.searchResults);
   } catch (error) {
@@ -504,7 +518,6 @@ async function renderAll() {
 
   const list = getCurrentList();
   ensureSelectedCode(list);
-  renderTabs();
   renderSelect(list);
   renderQuickList(list);
 
@@ -528,17 +541,6 @@ async function renderAll() {
   renderChart(meta, chartData);
 }
 
-marketTabs.forEach((tab) => {
-  tab.addEventListener("click", async () => {
-    state.market = tab.dataset.market;
-    state.query = "";
-    state.selectedCode = "";
-    state.searchError = "";
-    searchInput.value = "";
-    await renderAll();
-  });
-});
-
 searchInput.addEventListener("input", async (event) => {
   state.query = event.target.value;
   state.selectedCode = "";
@@ -556,7 +558,7 @@ quickList.addEventListener("click", async (event) => {
     return;
   }
 
-  state.selectedCode = target.dataset.code;
+  state.selectedCode = `${target.dataset.market}:${target.dataset.code}`;
   await renderAll();
 });
 
